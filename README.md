@@ -173,7 +173,3 @@ web_app/
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `NEXT_PUBLIC_API_URL` | Backend API の URL | `http://localhost:8000` |
-
-## License
-
-MIT
