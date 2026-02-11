@@ -56,6 +56,8 @@ async def gemini_analysis_job() -> None:
             )
 
             gemini = GeminiClient()
+            batch_size = 10
+            pending_count = 0
 
             for commit, repo_full_name in unanalyzed_commits:
                 try:
@@ -64,7 +66,7 @@ async def gemini_analysis_job() -> None:
                     )
                     if analysis is not None:
                         session.add(analysis)
-                        await session.commit()
+                        pending_count += 1
                         analyzed_count += 1
                         logger.info(
                             "Analyzed commit %s (repo=%s, category=%s)",
@@ -72,6 +74,11 @@ async def gemini_analysis_job() -> None:
                             repo_full_name,
                             analysis.work_category,
                         )
+
+                        # バッチサイズごとにコミット
+                        if pending_count >= batch_size:
+                            await session.commit()
+                            pending_count = 0
                     else:
                         skipped_count += 1
                         logger.debug(
@@ -98,6 +105,10 @@ async def gemini_analysis_job() -> None:
                     )
                     # 個別コミットのエラーではバッチを中断しない
                     continue
+
+            # 残りの未コミット分をコミット
+            if pending_count > 0:
+                await session.commit()
 
     except Exception:
         logger.exception("Gemini analysis job failed with unexpected error")

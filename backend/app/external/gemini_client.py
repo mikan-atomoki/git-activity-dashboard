@@ -1,6 +1,6 @@
 """Gemini API 非同期クライアント。
 
-google-generativeai ライブラリを使用し、コミットdiff分析、
+google-genai ライブラリを使用し、コミットdiff分析、
 週次/月次サマリー生成機能を提供する。
 """
 
@@ -8,13 +8,16 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
-import google.generativeai as genai
+from google import genai
+from google.genai import errors as genai_errors
+from google.genai import types as genai_types
 from pydantic import BaseModel, Field
 
 from app.config import settings
-from app.core.exceptions import GeminiParseError, GeminiRateLimitError
+from app.core.exceptions import ExternalAPIError, GeminiParseError, GeminiRateLimitError
 from app.core.rate_limiter import get_rate_limiter
 
 logger = logging.getLogger(__name__)
@@ -128,13 +131,10 @@ class GeminiClient:
 
     def __init__(self) -> None:
         """GeminiClientを初期化する。"""
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-        self._model = genai.GenerativeModel(
-            model_name="gemini-2.5-flash",
-            generation_config=genai.GenerationConfig(
-                response_mime_type="application/json",
-                temperature=0.3,
-            ),
+        self._client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        self._generation_config = genai_types.GenerateContentConfig(
+            response_mime_type="application/json",
+            temperature=0.3,
         )
         self._rate_limiter = get_rate_limiter()
 
@@ -316,8 +316,33 @@ class GeminiClient:
         await self._rate_limiter.acquire_gemini()
 
         try:
-            response = await self._model.generate_content_async(prompt)
+            response = await self._client.aio.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=self._generation_config,
+            )
+            if not response or not response.text:
+                raise GeminiParseError(
+                    detail="Gemini API returned empty response",
+                )
             return response.text
+        except (GeminiParseError, GeminiRateLimitError):
+            raise
+        except genai_errors.ClientError as exc:
+            if exc.code == 429:
+                logger.error("Gemini API rate limit exceeded: %s", exc.message)
+                raise GeminiRateLimitError(
+                    detail=f"Gemini API rate limit exceeded: {exc.message}",
+                )
+            logger.error("Gemini API client error: %s", exc.message)
+            raise ExternalAPIError(
+                detail=f"Gemini API client error: {exc.message}",
+            )
+        except genai_errors.APIError as exc:
+            logger.error("Gemini API call failed: %s", exc.message)
+            raise ExternalAPIError(
+                detail=f"Gemini API call failed: {exc.message}",
+            )
         except Exception as exc:
             error_msg = str(exc).lower()
             if "rate" in error_msg or "quota" in error_msg or "429" in error_msg:
@@ -326,7 +351,7 @@ class GeminiClient:
                     detail=f"Gemini API rate limit exceeded: {exc}",
                 )
             logger.error("Gemini API call failed: %s", exc)
-            raise GeminiParseError(
+            raise ExternalAPIError(
                 detail=f"Gemini API call failed: {exc}",
             )
 
@@ -359,7 +384,6 @@ class GeminiClient:
             pass
 
         # 2. ```json ... ``` ブロックからの抽出
-        import re
         json_block_pattern = re.compile(
             r"```(?:json)?\s*\n?(.*?)\n?\s*```",
             re.DOTALL,

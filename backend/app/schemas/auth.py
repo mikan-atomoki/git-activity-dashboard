@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -20,7 +19,7 @@ class UserRegisterRequest(BaseModel):
         max_length=39,
         description="GitHubログイン名",
     )
-    email: Optional[str] = Field(
+    email: str | None = Field(
         default=None,
         description="メールアドレス（任意）",
     )
@@ -39,8 +38,8 @@ class UserResponse(BaseModel):
 
     user_id: int
     github_login: str
-    display_name: Optional[str] = None
-    avatar_url: Optional[str] = None
+    display_name: str | None = None
+    avatar_url: str | None = None
     created_at: datetime
 
 

@@ -5,8 +5,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from pydantic import BaseModel, Field
 
 
@@ -16,7 +14,7 @@ class SettingsResponse(BaseModel):
     github_token_configured: bool = Field(
         description="GitHubトークンが設定済みか",
     )
-    github_username: Optional[str] = Field(
+    github_username: str | None = Field(
         default=None,
         description="GitHubユーザー名",
     )
@@ -39,21 +37,21 @@ class SettingsResponse(BaseModel):
 class SettingsUpdateRequest(BaseModel):
     """設定更新リクエスト。"""
 
-    github_token: Optional[str] = Field(
+    github_token: str | None = Field(
         default=None,
         description="GitHub Personal Access Token（暗号化して保存）",
     )
-    sync_interval_hours: Optional[int] = Field(
+    sync_interval_hours: int | None = Field(
         default=None,
         ge=1,
         le=168,
         description="同期間隔（時間、1〜168）",
     )
-    gemini_analysis_enabled: Optional[bool] = Field(
+    gemini_analysis_enabled: bool | None = Field(
         default=None,
         description="Gemini分析の有効/無効",
     )
-    timezone: Optional[str] = Field(
+    timezone: str | None = Field(
         default=None,
         description="タイムゾーン設定（例: Asia/Tokyo）",
     )
@@ -73,9 +71,9 @@ class ValidateGitHubTokenResponse(BaseModel):
     """GitHubトークン検証レスポンス。"""
 
     valid: bool
-    github_login: Optional[str] = None
-    github_user_id: Optional[int] = None
-    scopes: Optional[list[str]] = None
+    github_login: str | None = None
+    github_user_id: int | None = None
+    scopes: list[str] | None = None
     message: str = Field(
         description="検証結果メッセージ",
     )

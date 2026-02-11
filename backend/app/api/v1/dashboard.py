@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, get_session
@@ -72,7 +72,7 @@ async def get_dashboard_stats(
 async def get_commit_activity(
     period: str = Query(
         default="daily",
-        regex="^(daily|weekly|monthly)$",
+        pattern="^(daily|weekly|monthly)$",
         description="集計単位",
     ),
     start_date: date | None = Query(default=None, description="開始日"),
@@ -99,6 +99,9 @@ async def get_commit_activity(
     Returns:
         コミット推移レスポンス。
     """
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(status_code=422, detail="start_date must be <= end_date")
+
     query = CommitActivityQuery(
         period=period,  # type: ignore[arg-type]
         start_date=start_date,
@@ -168,6 +171,9 @@ async def get_repository_breakdown(
     Returns:
         リポジトリ別コミット比率レスポンス。
     """
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(status_code=422, detail="start_date must be <= end_date")
+
     service = DashboardService(session)
     return await service.get_repo_breakdown(
         user_id=current_user.user_id,
@@ -206,6 +212,9 @@ async def get_hourly_heatmap(
     Returns:
         ヒートマップレスポンス。
     """
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(status_code=422, detail="start_date must be <= end_date")
+
     service = DashboardService(session)
     return await service.get_hourly_heatmap(
         user_id=current_user.user_id,
@@ -243,6 +252,9 @@ async def get_tech_trends(
     Returns:
         技術トレンドレスポンス。
     """
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(status_code=422, detail="start_date must be <= end_date")
+
     service = DashboardService(session)
     return await service.get_tech_trends(
         user_id=current_user.user_id,
@@ -280,6 +292,9 @@ async def get_category_breakdown(
     Returns:
         カテゴリ比率レスポンス。
     """
+    if start_date and end_date and start_date > end_date:
+        raise HTTPException(status_code=422, detail="start_date must be <= end_date")
+
     service = DashboardService(session)
     return await service.get_category_breakdown(
         user_id=current_user.user_id,

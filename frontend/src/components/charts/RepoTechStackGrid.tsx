@@ -130,7 +130,7 @@ function RepoCard({ item }: { item: RepoTechStackItem }) {
           )}
 
           {/* Frameworks */}
-          {analysis.frameworks.length > 0 && (
+          {analysis.frameworks?.length > 0 && (
             <div>
               <p
                 className="mb-1 text-xs font-medium"
@@ -147,7 +147,7 @@ function RepoCard({ item }: { item: RepoTechStackItem }) {
           )}
 
           {/* Tools */}
-          {analysis.tools.length > 0 && (
+          {analysis.tools?.length > 0 && (
             <div>
               <p
                 className="mb-1 text-xs font-medium"
@@ -164,7 +164,7 @@ function RepoCard({ item }: { item: RepoTechStackItem }) {
           )}
 
           {/* Infrastructure */}
-          {analysis.infrastructure.length > 0 && (
+          {analysis.infrastructure?.length > 0 && (
             <div>
               <p
                 className="mb-1 text-xs font-medium"

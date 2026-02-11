@@ -151,7 +151,7 @@ async def update_settings(
 
     current_user.profile_data = profile
     session.add(current_user)
-    await session.flush()
+    await session.commit()
 
     # 更新後の設定を返す
     return await get_settings(session=session, current_user=current_user)
@@ -178,17 +178,13 @@ async def validate_github_token(
     client = GitHubClient(token=request.token)
     try:
         github_user = await client.get_authenticated_user()
-
-        # X-OAuth-Scopes ヘッダーからスコープを取得
-        # （get_authenticated_user内で最後のレスポンスからは取得困難なため、
-        #   rate_limit APIを追加で叩いて確認する代わりにレスポンスのフィールドで判断）
-        scopes: list[str] | None = None
+        scopes = await client.get_token_scopes()
 
         return ValidateGitHubTokenResponse(
             valid=True,
             github_login=github_user.get("login"),
             github_user_id=github_user.get("id"),
-            scopes=scopes,
+            scopes=scopes or None,
             message=f"Token is valid. Authenticated as {github_user.get('login')}",
         )
     except ExternalAPIError as e:

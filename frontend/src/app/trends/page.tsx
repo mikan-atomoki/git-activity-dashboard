@@ -77,7 +77,7 @@ export default function TrendsPage() {
 
   const handleTagToggle = (tag: string) => {
     setSelectedTechTags((prev) => {
-      const allTags = techTrendTags.map((t) => t.name);
+      const allTags = (techTrendTags ?? []).map((t) => t.name);
       if (prev.length === 0) {
         return allTags.filter((t) => t !== tag);
       }

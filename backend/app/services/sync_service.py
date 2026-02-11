@@ -557,8 +557,14 @@ class SyncService:
         Returns:
             分析成功したコミット数。
         """
+        if not commit_details:
+            return 0
+
         # 分析済みコミットIDを取得
         shas = [c.get("sha", "") for c in commit_details if c.get("sha")]
+        if not shas:
+            return 0
+
         stmt = select(Commit).where(
             Commit.repo_id == repo.repo_id,
             Commit.github_commit_sha.in_(shas),

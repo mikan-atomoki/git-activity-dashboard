@@ -50,25 +50,33 @@ export function useDashboardData(period: Period) {
   const fetchAll = useCallback(async () => {
     setData((prev) => ({ ...prev, loading: true, error: null }));
     try {
+      const fallbackStats: DashboardStatsResponse = {
+        total_commits: 0,
+        active_repos: 0,
+        current_streak: 0,
+        top_language: null,
+        commit_change_pct: null,
+      };
+
       const [stats, commits, langs, repos, heatmap, tech, cats] =
         await Promise.all([
-          getDashboardStats().catch(() => null),
-          getCommitActivity({ period }).catch(() => ({ data: [], total_commits: 0, period })),
-          getLanguageBreakdown().catch(() => ({ data: [] })),
-          getRepoBreakdown().catch(() => ({ data: [], total_commits: 0 })),
-          getHourlyHeatmap().catch(() => ({ data: [], max_count: 0 })),
-          getTechTrends().catch(() => ({ data: [] })),
-          getCategoryBreakdown().catch(() => ({ data: [] })),
+          getDashboardStats().catch(() => fallbackStats),
+          getCommitActivity({ period }).catch(() => ({ data: [] as CommitActivityPoint[], total_commits: 0, period })),
+          getLanguageBreakdown().catch(() => ({ data: [] as LanguageRatio[] })),
+          getRepoBreakdown().catch(() => ({ data: [] as RepoRatio[], total_commits: 0 })),
+          getHourlyHeatmap().catch(() => ({ data: [] as HeatmapCellResponse[], max_count: 0 })),
+          getTechTrends().catch(() => ({ data: [] as TechTrendItem[] })),
+          getCategoryBreakdown().catch(() => ({ data: [] as CategoryItem[] })),
         ]);
 
       setData({
         stats,
-        commitTimeline: commits.data,
-        languages: langs.data,
-        repos: { data: repos.data, total: repos.total_commits },
-        heatmap: heatmap.data,
-        techTrends: tech.data,
-        categories: cats.data,
+        commitTimeline: commits.data ?? [],
+        languages: langs.data ?? [],
+        repos: { data: repos.data ?? [], total: repos.total_commits ?? 0 },
+        heatmap: heatmap.data ?? [],
+        techTrends: tech.data ?? [],
+        categories: cats.data ?? [],
         loading: false,
         error: null,
       });

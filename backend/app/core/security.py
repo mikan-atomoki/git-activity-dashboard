@@ -131,8 +131,16 @@ def _get_aes_key() -> bytes:
 
     Returns:
         32バイトの鍵。
+
+    Raises:
+        ValueError: ENCRYPTION_KEY が不正なフォーマットの場合。
     """
-    return bytes.fromhex(settings.ENCRYPTION_KEY)
+    key = bytes.fromhex(settings.ENCRYPTION_KEY)
+    if len(key) != 32:
+        raise ValueError(
+            f"ENCRYPTION_KEY must be 64 hex chars (32 bytes), got {len(settings.ENCRYPTION_KEY)} chars"
+        )
+    return key
 
 
 def encrypt_token(plaintext: str) -> str:

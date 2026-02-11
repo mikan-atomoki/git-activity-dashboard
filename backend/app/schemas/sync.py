@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -16,7 +16,7 @@ from app.schemas.common import PaginationMeta
 class SyncTriggerRequest(BaseModel):
     """同期トリガーリクエスト。"""
 
-    repo_ids: Optional[list[int]] = Field(
+    repo_ids: list[int] | None = Field(
         default=None,
         description="同期対象のリポジトリIDリスト。Noneの場合は全アクティブリポジトリ",
     )
@@ -48,10 +48,10 @@ class SyncStatusResponse(BaseModel):
     job_id: int
     status: str
     job_type: str
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
     items_fetched: int = 0
-    error_detail: Optional[dict[str, Any]] = None
+    error_detail: dict[str, Any] | None = None
     created_at: datetime
 
 
@@ -63,12 +63,12 @@ class SyncLogItem(BaseModel):
     job_id: int
     job_type: str
     status: str
-    repo_id: Optional[int] = None
-    repo_full_name: Optional[str] = None
-    started_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    repo_id: int | None = None
+    repo_full_name: str | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
     items_fetched: int = 0
-    error_detail: Optional[dict[str, Any]] = None
+    error_detail: dict[str, Any] | None = None
     created_at: datetime
 
 

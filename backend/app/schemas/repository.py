@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -21,11 +21,11 @@ class RepositoryResponse(BaseModel):
     repo_id: int
     github_repo_id: int
     full_name: str
-    description: Optional[str] = None
-    primary_language: Optional[str] = None
+    description: str | None = None
+    primary_language: str | None = None
     is_private: bool = False
     is_active: bool = True
-    last_synced_at: Optional[datetime] = None
+    last_synced_at: datetime | None = None
     repo_metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
@@ -63,16 +63,16 @@ class DiscoveredRepository(BaseModel):
 
     github_repo_id: int
     full_name: str
-    description: Optional[str] = None
-    primary_language: Optional[str] = None
+    description: str | None = None
+    primary_language: str | None = None
     is_private: bool = False
     is_fork: bool = False
     already_tracked: bool = False
-    repo_id: Optional[int] = Field(
+    repo_id: int | None = Field(
         default=None,
         description="既に追跡中の場合のリポジトリID",
     )
-    pushed_at: Optional[str] = None
+    pushed_at: str | None = None
     stargazers_count: int = 0
 
 

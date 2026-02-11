@@ -63,9 +63,9 @@ export function useTrendsData(dateRange: DateRange) {
       ]);
 
       setData({
-        techTrends: tech.data,
-        categories: cats.data,
-        repoTechStacks: stacks.data,
+        techTrends: tech.data ?? [],
+        categories: cats.data ?? [],
+        repoTechStacks: stacks.data ?? [],
         loading: false,
         error: null,
       });

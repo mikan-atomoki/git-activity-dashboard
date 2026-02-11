@@ -77,7 +77,7 @@ async def get_weekly_summaries(
 async def get_monthly_summaries(
     year_month: str | None = Query(
         default=None,
-        regex=r"^\d{4}-\d{2}$",
+        pattern=r"^\d{4}-\d{2}$",
         description="基準年月（YYYY-MM形式）。未指定時は当月",
     ),
     count: int = Query(

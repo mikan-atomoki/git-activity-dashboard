@@ -64,6 +64,19 @@ class GitHubClient:
         response = await self._request("GET", "/user")
         return response.json()
 
+    async def get_token_scopes(self) -> list[str]:
+        """トークンのOAuthスコープを取得する。
+
+        GitHub APIのレスポンスヘッダー X-OAuth-Scopes から
+        スコープ一覧を抽出する。
+
+        Returns:
+            スコープ名のリスト。
+        """
+        response = await self._request("GET", "/user")
+        scopes_header = response.headers.get("X-OAuth-Scopes", "")
+        return [s.strip() for s in scopes_header.split(",") if s.strip()]
+
     async def get_user_repos(
         self,
         include_private: bool = True,
