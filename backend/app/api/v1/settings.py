@@ -17,6 +17,7 @@ from app.core.exceptions import ExternalAPIError
 from app.core.security import decrypt_token, encrypt_token
 from app.external.github_client import GitHubClient
 from app.models import Repository, User
+from app.services.sync_service import SyncService
 from app.schemas.setting import (
     SettingsResponse,
     SettingsUpdateRequest,
@@ -133,6 +134,9 @@ async def update_settings(
             finally:
                 await client.close()
 
+            # トークン保存後、全リポジトリを自動検出・登録
+            await _auto_register_repos(session, current_user)
+
     # profile_dataの更新
     profile = dict(current_user.profile_data or {})
 
@@ -201,3 +205,47 @@ async def validate_github_token(
         )
     finally:
         await client.close()
+
+
+# ---------------------------------------------------------------------------
+# リポジトリ自動登録ヘルパー
+# ---------------------------------------------------------------------------
+
+async def _auto_register_repos(
+    session: AsyncSession,
+    user: User,
+) -> None:
+    """GitHubの全リポジトリを自動検出してDBに登録（is_active=True）する。"""
+    sync_svc = SyncService(session)
+    try:
+        discovered = await sync_svc.discover_repositories(
+            user, include_private=True, include_forks=False,
+        )
+    except Exception:
+        logger.exception("Auto-discover failed for user %s", user.github_login)
+        return
+
+    registered = 0
+    for repo_info in discovered:
+        if repo_info["already_tracked"]:
+            continue
+
+        new_repo = Repository(
+            user_id=user.user_id,
+            github_repo_id=repo_info["github_repo_id"],
+            full_name=repo_info["full_name"],
+            description=repo_info.get("description"),
+            primary_language=repo_info.get("primary_language"),
+            is_private=repo_info.get("is_private", False),
+            is_active=True,
+        )
+        session.add(new_repo)
+        registered += 1
+
+    if registered:
+        await session.flush()
+        logger.info(
+            "Auto-registered %d repositories for user %s",
+            registered,
+            user.github_login,
+        )

@@ -269,6 +269,10 @@ class SyncService:
         Returns:
             完了したSyncJobインスタンス。
         """
+        # 同期前に新規リポジトリを自動検出・登録
+        if not repo_ids:
+            await self._auto_discover_new_repos(user)
+
         # 対象リポジトリを取得
         stmt = select(Repository).where(
             Repository.user_id == user.user_id,
@@ -446,6 +450,57 @@ class SyncService:
                 continue
 
         return analyzed
+
+    # ------------------------------------------------------------------
+    # リポジトリ自動検出
+    # ------------------------------------------------------------------
+
+    async def _auto_discover_new_repos(self, user: User) -> int:
+        """同期前に新規リポジトリを自動検出してDBに登録する。
+
+        Args:
+            user: Userモデルインスタンス。
+
+        Returns:
+            新規登録したリポジトリ数。
+        """
+        try:
+            discovered = await self.discover_repositories(
+                user, include_private=True, include_forks=False,
+            )
+        except Exception:
+            logger.exception(
+                "Auto-discover failed for user %s, skipping",
+                user.github_login,
+            )
+            return 0
+
+        registered = 0
+        for repo_info in discovered:
+            if repo_info["already_tracked"]:
+                continue
+
+            new_repo = Repository(
+                user_id=user.user_id,
+                github_repo_id=repo_info["github_repo_id"],
+                full_name=repo_info["full_name"],
+                description=repo_info.get("description"),
+                primary_language=repo_info.get("primary_language"),
+                is_private=repo_info.get("is_private", False),
+                is_active=True,
+            )
+            self.session.add(new_repo)
+            registered += 1
+
+        if registered:
+            await self.session.flush()
+            logger.info(
+                "Auto-discovered %d new repositories for user %s",
+                registered,
+                user.github_login,
+            )
+
+        return registered
 
     # ------------------------------------------------------------------
     # Internal Helpers

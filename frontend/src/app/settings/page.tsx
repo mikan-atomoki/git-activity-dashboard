@@ -7,33 +7,35 @@ import Button from "@/components/ui/Button";
 import {
   getSettings,
   updateSettings,
-  validateGitHubToken,
 } from "@/lib/api/settings";
-import { discoverRepositories, updateRepository } from "@/lib/api/repositories";
+import { getRepositories } from "@/lib/api/repositories";
 import { triggerSync, getSyncStatus } from "@/lib/api/sync";
 import type {
   SettingsResponse,
-  DiscoveredRepository,
+  RepositoryWithStats,
   SyncStatusResponse,
 } from "@/types/api";
 
 export default function SettingsPage() {
   const [token, setToken] = useState("");
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
-  const [repos, setRepos] = useState<DiscoveredRepository[]>([]);
+  const [repos, setRepos] = useState<RepositoryWithStats[]>([]);
   const [loadingSettings, setLoadingSettings] = useState(true);
   const [savingToken, setSavingToken] = useState(false);
   const [tokenMessage, setTokenMessage] = useState("");
-  const [discovering, setDiscovering] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState<string>("");
 
-  // Load settings on mount
+  // Load settings + repos on mount
   useEffect(() => {
-    getSettings()
-      .then(setSettings)
-      .catch(() => {})
-      .finally(() => setLoadingSettings(false));
+    Promise.all([
+      getSettings().catch(() => null),
+      getRepositories({ per_page: 100 }).catch(() => null),
+    ]).then(([s, r]) => {
+      if (s) setSettings(s);
+      if (r) setRepos(r.repositories);
+      setLoadingSettings(false);
+    });
   }, []);
 
   // Save GitHub token
@@ -42,17 +44,14 @@ export default function SettingsPage() {
     setSavingToken(true);
     setTokenMessage("");
     try {
-      // Validate first
-      const validation = await validateGitHubToken(token);
-      if (!validation.valid) {
-        setTokenMessage(validation.message);
-        return;
-      }
-      // Save token
+      // Save token (backend validates + auto-registers all repos)
       const updated = await updateSettings({ github_token: token });
       setSettings(updated);
       setToken("");
-      setTokenMessage(`Token saved successfully (${validation.github_login})`);
+      setTokenMessage(
+        `Token saved. ${updated.tracked_repos_count} repositories auto-registered.`,
+      );
+      refreshRepos();
     } catch (err) {
       setTokenMessage(err instanceof Error ? err.message : "Failed to save token");
     } finally {
@@ -60,26 +59,10 @@ export default function SettingsPage() {
     }
   };
 
-  // Discover repositories
-  const handleDiscover = async () => {
-    setDiscovering(true);
-    try {
-      const result = await discoverRepositories({ include_private: true });
-      setRepos(result.repositories);
-    } catch (err) {
-      console.error("Discover failed:", err);
-    } finally {
-      setDiscovering(false);
-    }
-  };
-
-  // Toggle repository tracking
-  const handleToggleRepo = async (repo: DiscoveredRepository) => {
-    if (repo.repo_id) {
-      await updateRepository(repo.repo_id, { is_active: !repo.already_tracked });
-      // Refresh list
-      handleDiscover();
-    }
+  // Refresh repos list
+  const refreshRepos = async () => {
+    const r = await getRepositories({ per_page: 100 }).catch(() => null);
+    if (r) setRepos(r.repositories);
   };
 
   // Poll sync status
@@ -90,8 +73,8 @@ export default function SettingsPage() {
         setSyncStatus(`${status.status} (${status.items_fetched} items)`);
         if (status.status === "completed" || status.status === "failed") {
           setSyncing(false);
-          // Refresh settings to get updated last_synced_at etc.
           getSettings().then(setSettings).catch(() => {});
+          refreshRepos();
           return;
         }
         setTimeout(poll, 3000);
@@ -172,7 +155,7 @@ export default function SettingsPage() {
               <p
                 className="text-sm"
                 style={{
-                  color: tokenMessage.includes("success")
+                  color: tokenMessage.includes("saved") || tokenMessage.includes("success")
                     ? "var(--accent-green)"
                     : "var(--accent-red)",
                 }}
@@ -186,27 +169,22 @@ export default function SettingsPage() {
           </div>
         </Card>
 
-        {/* Repository Selection Section */}
-        <Card title="Target Repositories">
+        {/* Tracked Repositories */}
+        <Card title="Tracked Repositories">
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-                {settings?.tracked_repos_count ?? 0} repositories tracked.
-              </p>
-              <Button
-                variant="secondary"
-                onClick={handleDiscover}
-                disabled={discovering || !settings?.github_token_configured}
-              >
-                {discovering ? "Discovering..." : "Discover Repos"}
-              </Button>
-            </div>
+            <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+              {repos.length > 0
+                ? `${repos.length} repositories are being tracked. New repos are auto-detected on each sync.`
+                : settings?.github_token_configured
+                  ? "Repositories will be auto-registered when you save your token or run a sync."
+                  : "Connect your GitHub token to start tracking repositories."}
+            </p>
 
-            {repos.length > 0 ? (
+            {repos.length > 0 && (
               <div className="max-h-80 space-y-2 overflow-y-auto">
                 {repos.map((repo) => (
                   <div
-                    key={repo.github_repo_id}
+                    key={repo.repo_id}
                     className="flex items-center justify-between rounded-lg border px-4 py-3"
                     style={{
                       backgroundColor: "var(--bg-tertiary)",
@@ -228,45 +206,13 @@ export default function SettingsPage() {
                           </span>
                         )}
                       </p>
-                      {repo.primary_language && (
-                        <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                          {repo.primary_language}
-                        </p>
-                      )}
+                      <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                        {repo.primary_language ?? "—"}
+                        {repo.commit_count > 0 && ` · ${repo.commit_count} commits`}
+                      </p>
                     </div>
-                    <button
-                      onClick={() => handleToggleRepo(repo)}
-                      className="rounded-md px-3 py-1 text-xs font-medium transition-colors"
-                      style={{
-                        backgroundColor: repo.already_tracked
-                          ? "var(--accent-green)"
-                          : "var(--bg-secondary)",
-                        color: repo.already_tracked
-                          ? "#fff"
-                          : "var(--text-secondary)",
-                        border: repo.already_tracked
-                          ? "none"
-                          : "1px solid var(--border)",
-                      }}
-                    >
-                      {repo.already_tracked ? "Tracked" : "Track"}
-                    </button>
                   </div>
                 ))}
-              </div>
-            ) : (
-              <div
-                className="flex h-32 items-center justify-center rounded-lg border border-dashed"
-                style={{
-                  borderColor: "var(--border)",
-                  backgroundColor: "var(--bg-tertiary)",
-                }}
-              >
-                <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-                  {settings?.github_token_configured
-                    ? 'Click "Discover Repos" to find your repositories'
-                    : "Connect GitHub token first"}
-                </p>
               </div>
             )}
           </div>

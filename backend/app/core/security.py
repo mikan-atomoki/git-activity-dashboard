@@ -5,6 +5,7 @@ cryptographyによるAES-256-GCMトークン暗号化を提供する。
 """
 
 import base64
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -147,7 +148,7 @@ def encrypt_token(plaintext: str) -> str:
     """
     key = _get_aes_key()
     aesgcm = AESGCM(key)
-    nonce = AESGCM.generate_key(bit_length=96)  # 12バイトのnonce
+    nonce = os.urandom(12)  # 12バイトのnonce
     ciphertext: bytes = aesgcm.encrypt(nonce, plaintext.encode("utf-8"), None)
     # nonce(12) + ciphertext+tag を結合してbase64
     return base64.urlsafe_b64encode(nonce + ciphertext).decode("ascii")
