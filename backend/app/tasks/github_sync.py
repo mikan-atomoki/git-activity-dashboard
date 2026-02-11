@@ -10,8 +10,10 @@ import logging
 
 from sqlalchemy import select
 
+from sqlalchemy import select as sa_select
+
 from app.database import async_session_factory
-from app.models import Repository, User
+from app.models import Repository, SyncJob, User
 from app.services.sync_service import SyncService
 
 logger = logging.getLogger(__name__)
@@ -91,6 +93,7 @@ async def manual_sync_job(
     user_id: int,
     repo_ids: list[int] | None = None,
     full_sync: bool = False,
+    sync_job_id: int | None = None,
 ) -> None:
     """手動同期トリガー用タスク。
 
@@ -100,12 +103,14 @@ async def manual_sync_job(
         user_id: 同期対象のユーザーID。
         repo_ids: 同期対象のリポジトリIDリスト。Noneの場合は全アクティブリポジトリ。
         full_sync: Trueの場合、全履歴を再同期する。
+        sync_job_id: triggerで作成済みのSyncJob ID。指定時はこのジョブを更新する。
     """
     logger.info(
-        "Starting manual sync job for user_id=%d, repo_ids=%s, full_sync=%s",
+        "Starting manual sync job for user_id=%d, repo_ids=%s, full_sync=%s, job_id=%s",
         user_id,
         repo_ids,
         full_sync,
+        sync_job_id,
     )
 
     async with async_session_factory() as session:
@@ -119,11 +124,19 @@ async def manual_sync_job(
                 logger.error("User not found: user_id=%d", user_id)
                 return
 
+            # 既存のSyncJobを取得（triggerで作成済みの場合）
+            existing_job: SyncJob | None = None
+            if sync_job_id is not None:
+                job_stmt = sa_select(SyncJob).where(SyncJob.job_id == sync_job_id)
+                job_result = await session.execute(job_stmt)
+                existing_job = job_result.scalar_one_or_none()
+
             sync_service = SyncService(session=session)
             sync_job = await sync_service.sync_all(
                 user=user,
                 repo_ids=repo_ids,
                 full_sync=full_sync,
+                existing_job=existing_job,
             )
 
             await session.commit()

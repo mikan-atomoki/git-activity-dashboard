@@ -105,6 +105,32 @@ export interface DashboardStatsResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Repo Tech Stack
+// ---------------------------------------------------------------------------
+
+export interface RepoTechAnalysis {
+  domain: string;
+  domain_detail: string;
+  frameworks: string[];
+  tools: string[];
+  infrastructure: string[];
+  project_type: string;
+  analyzed_at: string | null;
+}
+
+export interface RepoTechStackItem {
+  repo_id: number;
+  full_name: string;
+  description: string | null;
+  primary_language: string | null;
+  tech_analysis: RepoTechAnalysis | null;
+}
+
+export interface RepoTechStacksResponse {
+  data: RepoTechStackItem[];
+}
+
+// ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
 

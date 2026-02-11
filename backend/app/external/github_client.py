@@ -258,6 +258,42 @@ class GitHubClient:
         )
         return response.json()
 
+    async def get_file_content(
+        self,
+        repo_full_name: str,
+        path: str,
+    ) -> str | None:
+        """リポジトリ内のファイル内容を取得する。
+
+        GitHub Contents API を使用してファイルを取得し、base64デコードして返す。
+        ファイルが存在しない場合は None を返す。
+
+        Args:
+            repo_full_name: "owner/repo" 形式のリポジトリ名。
+            path: ファイルパス（例: "package.json"）。
+
+        Returns:
+            ファイル内容の文字列。404の場合はNone。
+        """
+        import base64
+
+        try:
+            response = await self._request(
+                "GET",
+                f"/repos/{repo_full_name}/contents/{path}",
+            )
+        except ExternalAPIError as e:
+            if "not found" in e.detail.lower():
+                return None
+            raise
+
+        data = response.json()
+        content_b64 = data.get("content")
+        if not content_b64:
+            return None
+
+        return base64.b64decode(content_b64).decode("utf-8", errors="replace")
+
     async def get_rate_limit(self) -> dict[str, Any]:
         """現在のレート制限情報を取得する。
 

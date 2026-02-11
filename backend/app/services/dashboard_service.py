@@ -25,6 +25,9 @@ from app.schemas.dashboard import (
     LanguageRatio,
     RepoBreakdownResponse,
     RepoRatio,
+    RepoTechAnalysis,
+    RepoTechStackItem,
+    RepoTechStacksResponse,
     TechTrendItem,
     TechTrendsResponse,
 )
@@ -661,3 +664,60 @@ class DashboardService:
             check_date -= timedelta(days=1)
 
         return streak
+
+    # ------------------------------------------------------------------
+    # リポジトリ技術スタック
+    # ------------------------------------------------------------------
+
+    async def get_repo_tech_stacks(
+        self,
+        user_id: int,
+    ) -> RepoTechStacksResponse:
+        """アクティブリポジトリの技術スタック分析結果を取得する。
+
+        repo_metadata JSONB カラムから tech_analysis を読み取る。
+
+        Args:
+            user_id: 対象ユーザーID。
+
+        Returns:
+            リポジトリ技術スタック一覧レスポンス。
+        """
+        stmt = (
+            select(Repository)
+            .where(
+                Repository.user_id == user_id,
+                Repository.is_active.is_(True),
+            )
+            .order_by(Repository.full_name)
+        )
+
+        result = await self.session.execute(stmt)
+        repos = result.scalars().all()
+
+        data: list[RepoTechStackItem] = []
+        for repo in repos:
+            tech_raw = (repo.repo_metadata or {}).get("tech_analysis")
+            tech_analysis: RepoTechAnalysis | None = None
+            if tech_raw and isinstance(tech_raw, dict):
+                tech_analysis = RepoTechAnalysis(
+                    domain=tech_raw.get("domain", "general"),
+                    domain_detail=tech_raw.get("domain_detail", ""),
+                    frameworks=tech_raw.get("frameworks", []),
+                    tools=tech_raw.get("tools", []),
+                    infrastructure=tech_raw.get("infrastructure", []),
+                    project_type=tech_raw.get("project_type", ""),
+                    analyzed_at=tech_raw.get("analyzed_at"),
+                )
+
+            data.append(
+                RepoTechStackItem(
+                    repo_id=repo.repo_id,
+                    full_name=repo.full_name,
+                    description=repo.description,
+                    primary_language=repo.primary_language,
+                    tech_analysis=tech_analysis,
+                ),
+            )
+
+        return RepoTechStacksResponse(data=data)

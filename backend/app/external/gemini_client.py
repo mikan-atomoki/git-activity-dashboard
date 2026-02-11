@@ -93,6 +93,29 @@ class MonthlySummaryResult(BaseModel):
         )
 
 
+class RepoTechStackResult(BaseModel):
+    """リポジトリ技術スタック分析結果。"""
+
+    domain: str = "general"
+    domain_detail: str = ""
+    frameworks: list[str] = Field(default_factory=list)
+    tools: list[str] = Field(default_factory=list)
+    infrastructure: list[str] = Field(default_factory=list)
+    project_type: str = ""
+
+    @classmethod
+    def fallback(cls, raw: dict[str, Any]) -> RepoTechStackResult:
+        """パース失敗時のフォールバック。"""
+        return cls(
+            domain=raw.get("domain", "general"),
+            domain_detail=raw.get("domain_detail", ""),
+            frameworks=raw.get("frameworks", []),
+            tools=raw.get("tools", []),
+            infrastructure=raw.get("infrastructure", []),
+            project_type=raw.get("project_type", ""),
+        )
+
+
 # ---------------------------------------------------------------------------
 # Gemini クライアント
 # ---------------------------------------------------------------------------
@@ -107,7 +130,7 @@ class GeminiClient:
         """GeminiClientを初期化する。"""
         genai.configure(api_key=settings.GEMINI_API_KEY)
         self._model = genai.GenerativeModel(
-            model_name="gemini-2.5-flash-preview",
+            model_name="gemini-2.5-flash",
             generation_config=genai.GenerationConfig(
                 response_mime_type="application/json",
                 temperature=0.3,
@@ -231,6 +254,46 @@ class GeminiClient:
             return MonthlySummaryResult.fallback({})
 
         return MonthlySummaryResult.fallback(parsed)
+
+    # ------------------------------------------------------------------
+    # リポジトリ技術スタック分析
+    # ------------------------------------------------------------------
+
+    async def analyze_repo_tech_stack(
+        self,
+        dependency_files: dict[str, str],
+        repo_description: str | None,
+        primary_language: str | None,
+    ) -> RepoTechStackResult:
+        """依存ファイルからリポジトリの技術スタックを分析する。
+
+        Args:
+            dependency_files: ファイル名→内容の辞書。
+            repo_description: リポジトリの説明文。
+            primary_language: 主要プログラミング言語。
+
+        Returns:
+            RepoTechStackResult。
+        """
+        # 各ファイルを5000文字に切り詰め
+        truncated: dict[str, str] = {
+            k: v[:5000] for k, v in dependency_files.items()
+        }
+
+        prompt = self._build_repo_tech_stack_prompt(
+            truncated, repo_description, primary_language,
+        )
+        raw_response = await self._generate(prompt)
+        parsed = self._parse_json_response(raw_response)
+
+        if parsed is None:
+            logger.warning(
+                "Gemini repo tech stack analysis JSON parse failed, "
+                "returning fallback result.",
+            )
+            return RepoTechStackResult.fallback({})
+
+        return RepoTechStackResult.fallback(parsed)
 
     # ------------------------------------------------------------------
     # Internal: API呼び出し
@@ -427,6 +490,46 @@ class GeminiClient:
     "suggestions": ["改善提案を1-3項目（日本語）"],
     "focus_areas": ["注力していた領域（日本語）"]
 }}"""
+
+    @staticmethod
+    def _build_repo_tech_stack_prompt(
+        dependency_files: dict[str, str],
+        repo_description: str | None,
+        primary_language: str | None,
+    ) -> str:
+        """リポジトリ技術スタック分析用プロンプトを構築する。"""
+        files_section = ""
+        for fname, content in dependency_files.items():
+            files_section += f"\n### {fname}\n```\n{content}\n```\n"
+
+        return f"""あなたはソフトウェアプロジェクトの技術スタックを分析する専門家です。
+以下のリポジトリ情報と依存ファイルから、プロジェクトの技術スタックを分析してJSON形式で出力してください。
+
+## リポジトリ情報
+- 説明: {repo_description or '(なし)'}
+- 主要言語: {primary_language or '(不明)'}
+
+## 依存ファイル
+{files_section}
+
+## 出力形式 (JSON)
+以下のJSON形式で出力してください。他のテキストは含めないでください。
+
+{{
+    "domain": "web_frontend|web_backend|mobile|data_science|machine_learning|devops|cli_tool|library|game|iot|general のいずれか1つ",
+    "domain_detail": "ドメインの詳細説明（例: 'SPA with server-side rendering', 'REST API server'）（英語、1文）",
+    "frameworks": ["検出されたフレームワーク名の配列（例: Next.js, FastAPI, Django）"],
+    "tools": ["検出されたツール・ライブラリ名の配列（例: ESLint, Pytest, Docker）"],
+    "infrastructure": ["検出されたインフラ・サービス名の配列（例: PostgreSQL, Redis, AWS S3）"],
+    "project_type": "プロジェクトの種類の簡潔な説明（英語、1文）"
+}}
+
+注意事項:
+- domain は上記の選択肢から最も適切なものを1つ選択
+- frameworks にはWebフレームワーク、UIライブラリ等を含める
+- tools にはビルドツール、テストツール、リンター、開発ツールを含める
+- infrastructure にはDB、キャッシュ、クラウドサービス、CI/CDを含める
+- 確信が持てない項目は空配列で返す"""
 
     @staticmethod
     def _build_monthly_summary_prompt(

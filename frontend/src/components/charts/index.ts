@@ -4,3 +4,4 @@ export { default as LanguageBreakdown } from "./LanguageBreakdown";
 export { default as ActivityHeatmap } from "./ActivityHeatmap";
 export { default as TechTrendChart } from "./TechTrendChart";
 export { default as CategoryPieChart } from "./CategoryPieChart";
+export { default as RepoTechStackGrid } from "./RepoTechStackGrid";

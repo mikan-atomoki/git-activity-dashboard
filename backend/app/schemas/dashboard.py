@@ -153,6 +153,38 @@ class CategoryBreakdownResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# リポジトリ技術スタック
+# ---------------------------------------------------------------------------
+
+class RepoTechAnalysis(BaseModel):
+    """リポジトリの技術分析結果。"""
+
+    domain: str
+    domain_detail: str
+    frameworks: list[str]
+    tools: list[str]
+    infrastructure: list[str]
+    project_type: str
+    analyzed_at: str | None = None
+
+
+class RepoTechStackItem(BaseModel):
+    """リポジトリ技術スタック1件。"""
+
+    repo_id: int
+    full_name: str
+    description: str | None
+    primary_language: str | None
+    tech_analysis: RepoTechAnalysis | None
+
+
+class RepoTechStacksResponse(BaseModel):
+    """リポジトリ技術スタック一覧レスポンス。"""
+
+    data: list[RepoTechStackItem]
+
+
+# ---------------------------------------------------------------------------
 # ダッシュボード統計カード
 # ---------------------------------------------------------------------------
 

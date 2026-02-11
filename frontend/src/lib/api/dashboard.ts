@@ -9,6 +9,7 @@ import type {
   TechTrendsResponse,
   CategoryBreakdownResponse,
   DashboardStatsResponse,
+  RepoTechStacksResponse,
 } from "@/types/api";
 
 export async function getDashboardStats(): Promise<DashboardStatsResponse> {
@@ -87,5 +88,11 @@ export async function getCategoryBreakdown(params?: {
   const qs = query.toString();
   return apiFetch<CategoryBreakdownResponse>(
     `/api/v1/dashboard/category-breakdown${qs ? `?${qs}` : ""}`,
+  );
+}
+
+export async function getRepoTechStacks(): Promise<RepoTechStacksResponse> {
+  return apiFetch<RepoTechStacksResponse>(
+    "/api/v1/dashboard/repo-tech-stacks",
   );
 }

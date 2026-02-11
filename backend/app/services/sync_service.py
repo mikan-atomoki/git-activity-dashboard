@@ -21,12 +21,35 @@ from app.core.exceptions import (
     NotFoundError,
 )
 from app.core.security import decrypt_token
-from app.external.gemini_client import GeminiClient
+from app.external.gemini_client import GeminiClient, RepoTechStackResult
 from app.external.github_client import GitHubClient
 from app.models import Commit, GeminiAnalysis, PullRequest, Repository, SyncJob, User
 from app.tasks.gemini_analysis import analyze_single_commit
 
 logger = logging.getLogger(__name__)
+
+# 技術スタック分析で取得を試みる依存ファイル一覧
+DEPENDENCY_FILES: list[str] = [
+    "package.json",
+    "requirements.txt",
+    "pyproject.toml",
+    "Cargo.toml",
+    "go.mod",
+    "Gemfile",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+    "composer.json",
+    "pubspec.yaml",
+    "mix.exs",
+    "Package.swift",
+    "CMakeLists.txt",
+    "Dockerfile",
+    "docker-compose.yml",
+]
+
+# テック分析のキャッシュ有効期間（日数）
+TECH_ANALYSIS_CACHE_DAYS = 30
 
 
 class SyncService:
@@ -232,7 +255,10 @@ class SyncService:
                 e.detail,
             )
 
-        # 6. Gemini分析（新規コミットのみ）
+        # 6. リポジトリ技術スタック分析（Gemini）
+        await self._analyze_repo_tech_stack(client, repo)
+
+        # 7. Gemini分析（新規コミットのみ）
         if commits_list:
             analyzed = await self._analyze_new_commits(repo, commit_details)
             logger.info(
@@ -241,7 +267,7 @@ class SyncService:
                 repo.full_name,
             )
 
-        # 7. last_synced_at更新
+        # 8. last_synced_at更新
         repo.last_synced_at = datetime.now(timezone.utc)
         self.session.add(repo)
         await self.session.flush()
@@ -253,10 +279,11 @@ class SyncService:
         user: User,
         repo_ids: list[int] | None = None,
         full_sync: bool = False,
+        existing_job: SyncJob | None = None,
     ) -> SyncJob:
         """全リポジトリの同期を実行する。
 
-        1. SyncJobレコード作成 (status=running)
+        1. SyncJobレコード作成 or 既存ジョブ使用 (status=running)
         2. 対象リポジトリをループ、sync_repositoryを呼ぶ
         3. エラーハンドリング（GitHubRateLimitErrorで中断）
         4. SyncJob完了更新
@@ -265,6 +292,7 @@ class SyncService:
             user: Userモデルインスタンス。
             repo_ids: 同期対象のリポジトリIDリスト。Noneの場合は全アクティブリポジトリ。
             full_sync: Trueの場合、全履歴を再同期する。
+            existing_job: 既存のSyncJobインスタンス。指定時はこれを使用する。
 
         Returns:
             完了したSyncJobインスタンス。
@@ -287,16 +315,23 @@ class SyncService:
         if not repos:
             logger.info("No active repositories to sync for user %s", user.user_id)
 
-        # SyncJobレコード作成
-        sync_job = SyncJob(
-            user_id=user.user_id,
-            job_type="manual_sync" if repo_ids else "scheduled_sync",
-            status="running",
-            started_at=datetime.now(timezone.utc),
-            items_fetched=0,
-        )
-        self.session.add(sync_job)
-        await self.session.flush()
+        # SyncJobレコード: 既存ジョブを使用 or 新規作成
+        if existing_job is not None:
+            sync_job = existing_job
+            sync_job.status = "running"
+            sync_job.started_at = datetime.now(timezone.utc)
+            self.session.add(sync_job)
+            await self.session.flush()
+        else:
+            sync_job = SyncJob(
+                user_id=user.user_id,
+                job_type="manual_sync" if repo_ids else "scheduled_sync",
+                status="running",
+                started_at=datetime.now(timezone.utc),
+                items_fetched=0,
+            )
+            self.session.add(sync_job)
+            await self.session.flush()
 
         logger.info(
             "Starting sync job %d for user %d (%d repositories)",
@@ -376,6 +411,130 @@ class SyncService:
         )
 
         return sync_job
+
+    # ------------------------------------------------------------------
+    # リポジトリ技術スタック分析
+    # ------------------------------------------------------------------
+
+    async def _analyze_repo_tech_stack(
+        self,
+        client: GitHubClient,
+        repo: Repository,
+    ) -> None:
+        """リポジトリの技術スタックをGeminiで分析し、repo_metadataに保存する。
+
+        30日以内に分析済みの場合はスキップする。
+
+        Args:
+            client: GitHubClientインスタンス。
+            repo: Repositoryモデルインスタンス。
+        """
+        # キャッシュチェック: tech_analysis が30日以内ならスキップ
+        existing_analysis = (repo.repo_metadata or {}).get("tech_analysis")
+        if existing_analysis and existing_analysis.get("analyzed_at"):
+            from datetime import datetime as _dt
+            try:
+                analyzed_at = _dt.fromisoformat(existing_analysis["analyzed_at"])
+                age = datetime.now(timezone.utc) - analyzed_at
+                if age.days < TECH_ANALYSIS_CACHE_DAYS:
+                    logger.debug(
+                        "Tech analysis cache hit for %s (age=%d days)",
+                        repo.full_name,
+                        age.days,
+                    )
+                    return
+            except (ValueError, TypeError):
+                pass  # 日付パースに失敗した場合は再分析
+
+        # 依存ファイルを取得（ルート → サブディレクトリ1階層）
+        dependency_files: dict[str, str] = {}
+
+        # まずルート直下を探索
+        for dep_file in DEPENDENCY_FILES:
+            try:
+                content = await client.get_file_content(repo.full_name, dep_file)
+                if content is not None:
+                    dependency_files[dep_file] = content
+            except ExternalAPIError:
+                continue
+
+        # ルートに見つからなければ、サブディレクトリ1階層を探索
+        if not dependency_files:
+            try:
+                response = await client._request(
+                    "GET", f"/repos/{repo.full_name}/contents/",
+                )
+                root_items = response.json()
+                subdirs = [
+                    item["name"]
+                    for item in root_items
+                    if isinstance(item, dict) and item.get("type") == "dir"
+                ][:10]  # 最大10サブディレクトリまで
+
+                for subdir in subdirs:
+                    for dep_file in DEPENDENCY_FILES:
+                        subpath = f"{subdir}/{dep_file}"
+                        try:
+                            content = await client.get_file_content(
+                                repo.full_name, subpath,
+                            )
+                            if content is not None:
+                                dependency_files[subpath] = content
+                        except ExternalAPIError:
+                            continue
+                    if dependency_files:
+                        break  # 最初に見つかったサブディレクトリでOK
+            except ExternalAPIError:
+                pass  # ルートのリスト取得自体に失敗（空リポ等）
+
+        if not dependency_files and not repo.primary_language:
+            logger.info(
+                "No dependency files or language for %s, skipping tech analysis",
+                repo.full_name,
+            )
+            return
+
+        # Gemini で分析（依存ファイルがなくても言語情報があれば分析可能）
+        try:
+            gemini = GeminiClient()
+            result: RepoTechStackResult = await gemini.analyze_repo_tech_stack(
+                dependency_files=dependency_files,
+                repo_description=repo.description,
+                primary_language=repo.primary_language,
+            )
+
+            # repo_metadata に保存
+            repo.repo_metadata = {
+                **(repo.repo_metadata or {}),
+                "tech_analysis": {
+                    "domain": result.domain,
+                    "domain_detail": result.domain_detail,
+                    "frameworks": result.frameworks,
+                    "tools": result.tools,
+                    "infrastructure": result.infrastructure,
+                    "project_type": result.project_type,
+                    "analyzed_at": datetime.now(timezone.utc).isoformat(),
+                },
+            }
+            self.session.add(repo)
+            await self.session.flush()
+
+            logger.info(
+                "Tech analysis completed for %s: domain=%s, frameworks=%s",
+                repo.full_name,
+                result.domain,
+                result.frameworks,
+            )
+        except GeminiRateLimitError:
+            logger.warning(
+                "Gemini rate limit hit during tech analysis for %s",
+                repo.full_name,
+            )
+        except Exception:
+            logger.exception(
+                "Tech analysis failed for %s",
+                repo.full_name,
+            )
 
     # ------------------------------------------------------------------
     # Gemini分析

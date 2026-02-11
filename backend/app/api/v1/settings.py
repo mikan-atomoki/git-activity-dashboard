@@ -70,7 +70,7 @@ async def get_settings(
             "sync_interval_hours",
             app_settings.SYNC_INTERVAL_HOURS,
         ),
-        gemini_analysis_enabled=profile.get("gemini_analysis_enabled", False),
+        gemini_analysis_enabled=profile.get("gemini_analysis_enabled", True),
         timezone=profile.get("timezone", app_settings.DEFAULT_TIMEZONE),
         tracked_repos_count=tracked_count,
     )

@@ -21,6 +21,7 @@ from app.schemas.dashboard import (
     HourlyHeatmapResponse,
     LanguageBreakdownResponse,
     RepoBreakdownResponse,
+    RepoTechStacksResponse,
     TechTrendsResponse,
 )
 from app.services.dashboard_service import DashboardService
@@ -285,3 +286,33 @@ async def get_category_breakdown(
         start_date=start_date,
         end_date=end_date,
     )
+
+
+# ---------------------------------------------------------------------------
+# リポジトリ技術スタック
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/repo-tech-stacks",
+    response_model=RepoTechStacksResponse,
+    summary="リポジトリ技術スタック一覧",
+)
+async def get_repo_tech_stacks(
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> RepoTechStacksResponse:
+    """アクティブリポジトリの技術スタック分析結果を返す。
+
+    repo_metadata の tech_analysis フィールドから読み取る。
+    Sync 実行時に Gemini で分析した結果が格納される。
+
+    Args:
+        current_user: 認証済みユーザー。
+        session: データベースセッション。
+
+    Returns:
+        リポジトリ技術スタック一覧レスポンス。
+    """
+    service = DashboardService(session)
+    return await service.get_repo_tech_stacks(user_id=current_user.user_id)

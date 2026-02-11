@@ -84,6 +84,9 @@ async def trigger_sync(
     session.add(sync_job)
     await session.flush()
 
+    # バックグラウンドタスクから参照できるよう明示的にcommit
+    await session.commit()
+
     logger.info(
         "Sync trigger: job_id=%d, user=%s, repos=%s, full_sync=%s",
         sync_job.job_id,
@@ -92,12 +95,13 @@ async def trigger_sync(
         request.full_sync,
     )
 
-    # バックグラウンドタスクとして同期を開始
+    # バックグラウンドタスクとして同期を開始（既存job_idを渡す）
     background_tasks.add_task(
         manual_sync_job,
         user_id=current_user.user_id,
         repo_ids=request.repo_ids,
         full_sync=request.full_sync,
+        sync_job_id=sync_job.job_id,
     )
 
     return SyncTriggerResponse(
