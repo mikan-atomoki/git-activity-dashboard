@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # --- External APIs ---
     GEMINI_API_KEY: str
 
+    # --- CORS ---
+    CORS_ORIGINS: str = "http://localhost:3000"
+
     # --- Localisation / Scheduling ---
     DEFAULT_TIMEZONE: str = "Asia/Tokyo"
     SYNC_INTERVAL_HOURS: int = 6
