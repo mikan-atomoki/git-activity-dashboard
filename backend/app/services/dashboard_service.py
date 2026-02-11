@@ -8,10 +8,45 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from sqlalchemy import Date, cast, func, literal_column, select
+from sqlalchemy import BigInteger, Date, Integer, String, column, func, select, table
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Commit, GeminiAnalysis, HourlyActivity, Repository
+from app.models import HourlyActivity, Repository
+
+# ---------------------------------------------------------------------------
+# マテリアライズドビュー参照
+# ---------------------------------------------------------------------------
+
+mv_daily_commit_stats = table(
+    "mv_daily_commit_stats",
+    column("commit_date", Date),
+    column("repo_id", BigInteger),
+    column("user_id", BigInteger),
+    column("full_name", String),
+    column("primary_language", String),
+    column("commit_count", Integer),
+    column("total_additions", Integer),
+    column("total_deletions", Integer),
+    column("total_changed_files", Integer),
+)
+
+mv_weekly_tech_trends = table(
+    "mv_weekly_tech_trends",
+    column("week_start", Date),
+    column("repo_id", BigInteger),
+    column("user_id", BigInteger),
+    column("tech_tag", String),
+    column("tag_count", Integer),
+)
+
+mv_work_category_stats = table(
+    "mv_work_category_stats",
+    column("analysis_date", Date),
+    column("repo_id", BigInteger),
+    column("user_id", BigInteger),
+    column("work_category", String),
+    column("category_count", Integer),
+)
 from app.schemas.dashboard import (
     CategoryBreakdownResponse,
     CategoryItem,
@@ -102,40 +137,32 @@ class DashboardService:
         end = query.end_date or today
 
         # period ごとの date_trunc 引数
-        trunc_arg = query.period  # "daily" -> "day", etc.
         trunc_map = {"daily": "day", "weekly": "week", "monthly": "month"}
-        trunc_unit = trunc_map[trunc_arg]
+        trunc_unit = trunc_map[query.period]
 
-        # date_trunc でグルーピング用カラムを生成
-        period_col = func.date_trunc(trunc_unit, Commit.committed_at).label(
+        mv = mv_daily_commit_stats
+        period_col = func.date_trunc(trunc_unit, mv.c.commit_date).label(
             "period_date",
         )
-
-        # ユーザーのリポジトリを取得するサブクエリ
-        repo_subq = (
-            select(Repository.repo_id)
-            .where(Repository.user_id == user_id)
-        )
-
-        # repo_ids フィルタ
-        if query.repo_ids:
-            repo_subq = repo_subq.where(Repository.repo_id.in_(query.repo_ids))
 
         stmt = (
             select(
                 period_col,
-                func.count().label("cnt"),
-                func.coalesce(func.sum(Commit.additions), 0).label("adds"),
-                func.coalesce(func.sum(Commit.deletions), 0).label("dels"),
+                func.sum(mv.c.commit_count).label("cnt"),
+                func.coalesce(func.sum(mv.c.total_additions), 0).label("adds"),
+                func.coalesce(func.sum(mv.c.total_deletions), 0).label("dels"),
             )
             .where(
-                Commit.repo_id.in_(repo_subq),
-                Commit.committed_at >= start,
-                Commit.committed_at < end + timedelta(days=1),
+                mv.c.user_id == user_id,
+                mv.c.commit_date >= start,
+                mv.c.commit_date <= end,
             )
-            .group_by(period_col)
-            .order_by(period_col)
         )
+
+        if query.repo_ids:
+            stmt = stmt.where(mv.c.repo_id.in_(query.repo_ids))
+
+        stmt = stmt.group_by(period_col).order_by(period_col)
 
         result = await self.session.execute(stmt)
         rows = result.all()
@@ -243,25 +270,21 @@ class DashboardService:
         start = start_date or (today - timedelta(days=90))
         end = end_date or today
 
+        mv = mv_daily_commit_stats
         stmt = (
             select(
-                Repository.repo_id,
-                Repository.full_name,
-                Repository.primary_language,
-                func.count().label("commit_count"),
+                mv.c.repo_id,
+                mv.c.full_name,
+                mv.c.primary_language,
+                func.sum(mv.c.commit_count).label("commit_count"),
             )
-            .join(Commit, Commit.repo_id == Repository.repo_id)
             .where(
-                Repository.user_id == user_id,
-                Commit.committed_at >= start,
-                Commit.committed_at < end + timedelta(days=1),
+                mv.c.user_id == user_id,
+                mv.c.commit_date >= start,
+                mv.c.commit_date <= end,
             )
-            .group_by(
-                Repository.repo_id,
-                Repository.full_name,
-                Repository.primary_language,
-            )
-            .order_by(func.count().desc())
+            .group_by(mv.c.repo_id, mv.c.full_name, mv.c.primary_language)
+            .order_by(func.sum(mv.c.commit_count).desc())
             .limit(limit)
         )
 
@@ -380,31 +403,20 @@ class DashboardService:
         start = start_date or (today - timedelta(days=90))
         end = end_date or today
 
-        # ユーザーのリポジトリID一覧サブクエリ
-        repo_subq = select(Repository.repo_id).where(
-            Repository.user_id == user_id,
-        )
-
-        # tech_tags JSONB配列を展開するために lateral join 相当を利用
-        # jsonb_array_elements_text(tech_tags) -> tag
-        tag_col = func.jsonb_array_elements_text(GeminiAnalysis.tech_tags).label("tag")
-        period_col = func.date_trunc("week", GeminiAnalysis.analyzed_at).label(
-            "period_start",
-        )
-
+        mv = mv_weekly_tech_trends
         stmt = (
             select(
-                period_col,
-                tag_col,
-                func.count().label("cnt"),
+                mv.c.week_start.label("period_start"),
+                mv.c.tech_tag.label("tag"),
+                func.sum(mv.c.tag_count).label("cnt"),
             )
             .where(
-                GeminiAnalysis.repo_id.in_(repo_subq),
-                GeminiAnalysis.analyzed_at >= start,
-                GeminiAnalysis.analyzed_at < end + timedelta(days=1),
+                mv.c.user_id == user_id,
+                mv.c.week_start >= start,
+                mv.c.week_start <= end,
             )
-            .group_by(period_col, literal_column("tag"))
-            .order_by(period_col, func.count().desc())
+            .group_by(mv.c.week_start, mv.c.tech_tag)
+            .order_by(mv.c.week_start, func.sum(mv.c.tag_count).desc())
         )
 
         result = await self.session.execute(stmt)
@@ -457,22 +469,19 @@ class DashboardService:
         start = start_date or (today - timedelta(days=90))
         end = end_date or today
 
-        repo_subq = select(Repository.repo_id).where(
-            Repository.user_id == user_id,
-        )
-
+        mv = mv_work_category_stats
         stmt = (
             select(
-                GeminiAnalysis.work_category,
-                func.count().label("cnt"),
+                mv.c.work_category,
+                func.sum(mv.c.category_count).label("cnt"),
             )
             .where(
-                GeminiAnalysis.repo_id.in_(repo_subq),
-                GeminiAnalysis.analyzed_at >= start,
-                GeminiAnalysis.analyzed_at < end + timedelta(days=1),
+                mv.c.user_id == user_id,
+                mv.c.analysis_date >= start,
+                mv.c.analysis_date <= end,
             )
-            .group_by(GeminiAnalysis.work_category)
-            .order_by(func.count().desc())
+            .group_by(mv.c.work_category)
+            .order_by(func.sum(mv.c.category_count).desc())
         )
 
         result = await self.session.execute(stmt)
@@ -514,14 +523,12 @@ class DashboardService:
         Returns:
             統計カードレスポンス。
         """
-        repo_subq = select(Repository.repo_id).where(
-            Repository.user_id == user_id,
-        )
+        mv = mv_daily_commit_stats
 
         # --- total_commits ---
-        total_stmt = select(func.count()).where(
-            Commit.repo_id.in_(repo_subq),
-        )
+        total_stmt = select(
+            func.coalesce(func.sum(mv.c.commit_count), 0),
+        ).where(mv.c.user_id == user_id)
         total_result = await self.session.execute(total_stmt)
         total_commits = total_result.scalar_one() or 0
 
@@ -557,24 +564,22 @@ class DashboardService:
         prev_month_end = current_month_start - timedelta(days=1)
         prev_month_start = prev_month_end.replace(day=1)
 
-        current_month_stmt = (
-            select(func.count())
-            .where(
-                Commit.repo_id.in_(repo_subq),
-                Commit.committed_at >= current_month_start,
-                Commit.committed_at < today + timedelta(days=1),
-            )
+        current_month_stmt = select(
+            func.coalesce(func.sum(mv.c.commit_count), 0),
+        ).where(
+            mv.c.user_id == user_id,
+            mv.c.commit_date >= current_month_start,
+            mv.c.commit_date <= today,
         )
         current_result = await self.session.execute(current_month_stmt)
         current_month_commits = current_result.scalar_one() or 0
 
-        prev_month_stmt = (
-            select(func.count())
-            .where(
-                Commit.repo_id.in_(repo_subq),
-                Commit.committed_at >= prev_month_start,
-                Commit.committed_at < current_month_start,
-            )
+        prev_month_stmt = select(
+            func.coalesce(func.sum(mv.c.commit_count), 0),
+        ).where(
+            mv.c.user_id == user_id,
+            mv.c.commit_date >= prev_month_start,
+            mv.c.commit_date < current_month_start,
         )
         prev_result = await self.session.execute(prev_month_stmt)
         prev_month_commits = prev_result.scalar_one() or 0
@@ -614,24 +619,19 @@ class DashboardService:
         Returns:
             連続コミット日数。
         """
-        repo_subq = select(Repository.repo_id).where(
-            Repository.user_id == user_id,
-        )
-
         # コミットが存在するユニークな日付を降順で取得（直近120日分）
         today = date.today()
         cutoff = today - timedelta(days=120)
 
+        mv = mv_daily_commit_stats
         stmt = (
-            select(
-                cast(Commit.committed_at, Date).label("commit_date"),
-            )
+            select(mv.c.commit_date)
             .where(
-                Commit.repo_id.in_(repo_subq),
-                Commit.committed_at >= cutoff,
+                mv.c.user_id == user_id,
+                mv.c.commit_date >= cutoff,
             )
-            .group_by(literal_column("commit_date"))
-            .order_by(literal_column("commit_date").desc())
+            .group_by(mv.c.commit_date)
+            .order_by(mv.c.commit_date.desc())
         )
 
         result = await self.session.execute(stmt)
